@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>출석 체크</title>
+<style>
+  body { font: 16px/1.5 -apple-system, 'Malgun Gothic', sans-serif; margin: 0; padding: 16px; background: #f6f7f9; color: #111; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: #666; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  button { font: inherit; padding: 14px 10px; border: 1px solid #cfd4dc; border-radius: 10px; background: #fff; }
+  button.primary { background: #2457f5; color: #fff; border-color: #2457f5; width: 100%; }
+  button.link { border: 0; background: none; color: #2457f5; margin-top: 16px; width: 100%; }
+  input, textarea, select { font: inherit; width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cfd4dc; border-radius: 10px; margin: 6px 0; }
+  .msg { padding: 24px 8px; text-align: center; font-size: 18px; }
+  .back { background: none; border: 0; color: #666; padding: 4px 0; }
+</style>
+</head>
+<body>
+<div id="app"><div class="msg">불러오는 중…</div></div>
+<script>
+  // 앱스크립트 웹 앱(/exec) 주소. 새 배포를 만들면 이 값을 바꾼다.
+  var API = 'https://script.google.com/macros/s/AKfycbxruK02BBOJH4XCRO0-m9iC6OD3ZEYtSA7JKiFWYOO2aPYxPBgbqYXreljuayCS2nCM/exec';
+  var TOKEN = new URLSearchParams(location.search).get('t') || '';
+  var D = null;
+  var app = document.getElementById('app');
+  var picked = null;
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function head() { return '<h1>' + esc(D.education) + '</h1><div class="sub">' + esc(D.date) + '</div>'; }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+
+  // 서버가 바쁘거나(busy/error) 네트워크가 불안정하면 약 25초 동안 간격을 늘려가며 다시 시도한다.
+  function call(fn, tries) {
+    tries = tries || 0;
+    function again() {
+      if (tries >= 7) return Promise.reject(new Error('retries exhausted'));
+      return wait(Math.min(4000, 700 * Math.pow(1.7, tries)) + Math.random() * 500).then(function () { return call(fn, tries + 1); });
+    }
+    return fn()
+      .then(function (r) { return (!r.ok && (r.reason === 'busy' || r.reason === 'error')) ? again() : r; })
+      .catch(function () { return again(); });
+  }
+  function post(payload) {
+    return call(function () {
+      return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+    });
+  }
+  function load() {
+    return call(function () {
+      return fetch(API + '?format=json&t=' + encodeURIComponent(TOKEN)).then(function (r) { return r.json(); });
+    });
+  }
+
+  function showRegions() {
+    if (!D.open) { app.innerHTML = head() + '<div class="msg">' + (D.status === 'scheduled' ? '아직 시작 전입니다. 잠시 후 다시 열어 주세요.' : '출석이 마감되었습니다.') + '</div>'; return; }
+    var present = D.regions.filter(function (r) { return D.roster.some(function (p) { return p.region === r; }); });
+    app.innerHTML = head() + '<div class="grid">' + present.map(function (r) { return '<button data-r="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div><button class="link" id="walk">명단에 없어요</button>';
+    app.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { showNames(b.getAttribute('data-r')); }; });
+    document.getElementById('walk').onclick = showWalkIn;
+  }
+
+  function showNames(region) {
+    var list = D.roster.filter(function (p) { return p.region === region; });
+    app.innerHTML = head() + '<button class="back" id="back">← 지역 다시 고르기</button><div class="grid">' + list.map(function (p) { return '<button data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>'; }).join('') + '</div><button class="link" id="walk">명단에 없어요</button>';
+    document.getElementById('back').onclick = showRegions;
+    document.getElementById('walk').onclick = showWalkIn;
+    app.querySelectorAll('[data-id]').forEach(function (b) { b.onclick = function () { confirmPick(b.getAttribute('data-id')); }; });
+  }
+
+  function confirmPick(id) {
+    picked = D.roster.filter(function (p) { return String(p.id) === String(id); })[0];
+    app.innerHTML = head() + '<div class="msg"><b>' + esc(picked.name) + '</b>님 맞나요?<br><span class="sub">' + esc(picked.region) + '</span></div><button class="primary" id="ok">확인</button><button class="link" id="no">아니에요</button>';
+    document.getElementById('no').onclick = function () { showNames(picked.region); };
+    document.getElementById('ok').onclick = function () {
+      this.disabled = true;
+      post({ action: 'attend', token: TOKEN, personId: picked.id }).then(function (r) {
+        if (r.ok) app.innerHTML = head() + '<div class="msg">' + esc(picked.name) + '님 ' + (r.status === 'already' ? '이미 출석했습니다.' : '출석이 완료되었습니다.') + '</div>';
+        else if (r.reason === 'closed') app.innerHTML = head() + '<div class="msg">출석이 마감되었습니다.</div>';
+        else app.innerHTML = head() + '<div class="msg">처리하지 못했습니다. 운영진에게 알려 주세요.</div>';
+      }).catch(function () { app.innerHTML = head() + '<div class="msg">연결이 불안정합니다. 잠시 후 다시 시도해 주세요.</div><button class="primary" onclick="showRegions()">처음으로</button>'; });
+    };
+  }
+
+  function showWalkIn() {
+    app.innerHTML = head() + '<div class="sub">명단에 없는 분은 아래를 적어 주세요.</div><input id="n" placeholder="이름" maxlength="20"><select id="g">' + D.regions.map(function (r) { return '<option>' + esc(r) + '</option>'; }).join('') + '</select><textarea id="m" rows="2" maxlength="200" placeholder="메모 (선택)"></textarea><button class="primary" id="go">접수</button><button class="link" id="b">돌아가기</button>';
+    document.getElementById('b').onclick = showRegions;
+    document.getElementById('go').onclick = function () {
+      var btn = this; btn.disabled = true;
+      post({ action: 'walkin', token: TOKEN, name: document.getElementById('n').value, region: document.getElementById('g').value, memo: document.getElementById('m').value }).then(function (r) {
+        if (r.ok) app.innerHTML = head() + '<div class="msg">접수되었습니다. 운영진이 확인합니다.</div>';
+        else { btn.disabled = false; alert(r.reason === 'invalid-name' ? '이름을 2~20자로 적어 주세요.' : r.reason === 'closed' ? '출석이 마감되었습니다.' : '처리하지 못했습니다.'); }
+      }).catch(function () { btn.disabled = false; alert('연결이 불안정합니다. 다시 시도해 주세요.'); });
+    };
+  }
+
+  if (!TOKEN) {
+    app.innerHTML = '<div class="msg">잘못된 QR 입니다.</div>';
+  } else {
+    load().then(function (r) {
+      if (!r.ok) { app.innerHTML = '<div class="msg">잘못된 QR 입니다.</div>'; return; }
+      D = r;
+      showRegions();
+    }).catch(function () { app.innerHTML = '<div class="msg">연결이 불안정합니다. 잠시 후 다시 열어 주세요.</div>'; });
+  }
+</script>
+</body>
+</html>
