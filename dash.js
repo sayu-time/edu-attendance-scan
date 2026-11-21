@@ -31,6 +31,7 @@
     error: '',
     editing: '',
     filter: params.get('f') || '전체',
+    sort: params.get('o') || '명단순',
     q: params.get('q') || '',
     notice: '',
   };
@@ -40,6 +41,10 @@
   const dlg = document.getElementById('dlg');
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  // QR 출석 시각(UTC 문자열)을 한국 시간 시:분:초로 보여 준다. 기록이 없으면 하이픈.
+  const fmtTime = (iso) => (iso && !isNaN(new Date(iso)) ? esc(clock.format(new Date(iso))) : '<span class="muted">-</span>');
+  const fmtDateTime = (iso) => (iso && !isNaN(new Date(iso)) ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }) : '');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const msg = (reason) => MESSAGES[reason] || '처리하지 못했습니다. 다시 시도해 주세요.';
 
@@ -56,6 +61,7 @@
     const p = new URLSearchParams();
     if (S.sessionId) p.set('s', S.sessionId);
     if (S.filter && S.filter !== '전체') p.set('f', S.filter);
+    if (S.sort && S.sort !== '명단순') p.set('o', S.sort);
     if (S.q) p.set('q', S.q);
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
@@ -184,9 +190,9 @@
     const filters = ['전체', '결석', '사유결석', '미확인', '출석'].map((f) => `<option${f === S.filter ? ' selected' : ''}>${f}</option>`).join('');
     const rosterPanel = `
       <section class="panel"><div class="panel-head"><h2>${MODE === 'admin' ? '출결 명단' : esc(S.region) + ' 출결 명단'}</h2>
-        <div class="tools"><input type="search" id="q" placeholder="이름 검색" aria-label="이름 검색" value="${esc(S.q)}"><select id="filter" aria-label="상태 필터">${filters}</select></div></div>
+        <div class="tools"><input type="search" id="q" placeholder="이름 검색" aria-label="이름 검색" value="${esc(S.q)}"><select id="filter" aria-label="상태 필터">${filters}</select><select id="sort" aria-label="정렬">${['명단순', '도착순'].map((o) => `<option${o === S.sort ? ' selected' : ''}>${o}</option>`).join('')}</select></div></div>
         <div id="notice"></div>
-        <div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th><th>상태</th><th>사유</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th><th>상태</th><th>출석 시간</th><th>사유</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
       </section>`;
     if (MODE === 'admin') return `${figures}${walk}<div class="cols">${regionPanel}${rosterPanel}</div>`;
     return `${figures}${rosterPanel}`;
@@ -212,7 +218,12 @@
 
   function visibleRows() {
     const q = S.q.trim();
-    return S.view.rows.filter((r) => (S.filter === '전체' || r.status === S.filter) && (!q || r.name.indexOf(q) !== -1));
+    const list = S.view.rows.filter((r) => (S.filter === '전체' || r.status === S.filter) && (!q || r.name.indexOf(q) !== -1));
+    if (S.sort === '도착순') {
+      // 출석 시각이 빠른 순. 기록이 없는 사람은 맨 뒤에 둔다.
+      return list.slice().sort((a, b) => (a.at && b.at ? (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) : a.at ? -1 : b.at ? 1 : 0));
+    }
+    return list;
   }
 
   function canEdit(r) { return MODE === 'admin' || r.status !== '출석'; }
@@ -222,11 +233,11 @@
     if (!tbody) return;
     const list = visibleRows();
     if (!S.view.rows.length) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><p>이 회차에 대상자가 없습니다.</p></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><p>이 회차에 대상자가 없습니다.</p></div></td></tr>`;
       return;
     }
     if (!list.length) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty"><p>조건에 맞는 사람이 없습니다.</p></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><p>조건에 맞는 사람이 없습니다.</p></div></td></tr>`;
       return;
     }
     const statusChoices = MODE === 'admin' ? ['출석', '결석', '사유결석', '미확인'] : ['결석', '사유결석'];
@@ -236,11 +247,13 @@
         const startStatus = statusChoices.indexOf(r.status) === -1 ? statusChoices[0] : r.status;
         return `<tr class="is-editing" data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
           <td><select data-edit="status" aria-label="상태">${opts}</select></td>
+          <td>${fmtTime(r.at)}</td>
           <td><input type="text" data-edit="reason" maxlength="200" placeholder="사유" value="${esc(r.reason)}" aria-label="사유"${startStatus === '사유결석' ? '' : ' hidden'}></td>
           <td><div class="row-actions"><button class="btn btn--small btn--primary" data-act="save" type="button">저장</button><button class="btn btn--small" data-act="cancel" type="button">취소</button></div></td></tr>`;
       }
       return `<tr data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
         <td><span class="chip chip--${CHIP[r.status]}">${esc(r.status)}</span></td>
+        <td>${fmtTime(r.at)}</td>
         <td>${r.reason ? esc(r.reason) : '<span class="muted">없음</span>'}</td>
         <td><div class="row-actions">${canEdit(r) ? '<button class="btn btn--small btn--quiet" data-act="edit" type="button">수정</button>' : ''}</div></td></tr>`;
     }).join('');
@@ -289,8 +302,8 @@
   }
   function downloadCsv() {
     const v = S.view;
-    const head = ['이름', '지역', '상태', '사유'];
-    const lines = [head.map(csvCell).join(',')].concat(v.rows.map((r) => [r.name, r.region, r.status, r.reason].map(csvCell).join(',')));
+    const head = ['이름', '지역', '상태', '출석시간', '사유'];
+    const lines = [head.map(csvCell).join(',')].concat(v.rows.map((r) => [r.name, r.region, r.status, fmtDateTime(r.at), r.reason].map(csvCell).join(',')));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -364,6 +377,7 @@
     const t = e.target;
     if (t.id === 'session') { S.sessionId = t.value; loadView(); return; }
     if (t.id === 'filter') { S.filter = t.value; setUrl(); renderRows(); return; }
+    if (t.id === 'sort') { S.sort = t.value; setUrl(); renderRows(); return; }
     if (t.getAttribute && t.getAttribute('data-edit') === 'status') {
       const input = t.closest('tr').querySelector('[data-edit=reason]');
       input.hidden = t.value !== '사유결석';
