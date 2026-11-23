@@ -14,6 +14,8 @@
   button.link { border: 0; background: none; color: #2457f5; margin-top: 16px; width: 100%; }
   input, textarea, select { font: inherit; width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cfd4dc; border-radius: 10px; margin: 6px 0; }
   .msg { padding: 24px 8px; text-align: center; font-size: 18px; }
+  .msg.late { color: #9a3412; }
+  .msg small { display: block; margin-top: 8px; font-size: 14px; color: #666; }
   .back { background: none; border: 0; color: #666; padding: 4px 0; }
 </style>
 </head>
@@ -28,7 +30,16 @@
   var picked = null;
 
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-  function head() { return '<h1>' + esc(D.education) + '</h1><div class="sub">' + esc(D.date) + '</div>'; }
+  function head() { return '<h1>' + esc(D.education) + '</h1><div class="sub">' + esc(D.date) + (D.lateAfter ? ' 정시 ' + esc(D.lateAfter) + ' (이후 도착은 지각)' : '') + '</div>'; }
+  var clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  function timeOf(iso) { var d = new Date(iso); return isNaN(d) ? '' : clock.format(d); }
+  // 출석 결과 안내. 지각이면 지각임을 분명히 알린다.
+  function doneMsg(name, r) {
+    if (r.status === 'already') return '<div class="msg">' + esc(name) + '님 이미 출석했습니다.</div>';
+    var t = r.at ? '<small>' + esc(timeOf(r.at)) + ' 도착으로 기록되었습니다.</small>' : '';
+    if (r.late) return '<div class="msg late"><b>' + esc(name) + '님 지각입니다.</b><br>정시(' + esc(r.lateAfter) + ')가 지난 뒤 출석이 기록되었습니다.' + t + '</div>';
+    return '<div class="msg">' + esc(name) + '님 출석이 완료되었습니다.' + t + '</div>';
+  }
   function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
 
   // 서버가 바쁘거나(busy/error) 네트워크가 불안정하면 약 25초 동안 간격을 늘려가며 다시 시도한다.
@@ -76,7 +87,7 @@
     document.getElementById('ok').onclick = function () {
       this.disabled = true;
       post({ action: 'attend', token: TOKEN, personId: picked.id }).then(function (r) {
-        if (r.ok) app.innerHTML = head() + '<div class="msg">' + esc(picked.name) + '님 ' + (r.status === 'already' ? '이미 출석했습니다.' : '출석이 완료되었습니다.') + '</div>';
+        if (r.ok) app.innerHTML = head() + doneMsg(picked.name, r);
         else if (r.reason === 'closed') app.innerHTML = head() + '<div class="msg">출석이 마감되었습니다.</div>';
         else app.innerHTML = head() + '<div class="msg">처리하지 못했습니다. 운영진에게 알려 주세요.</div>';
       }).catch(function () { app.innerHTML = head() + '<div class="msg">연결이 불안정합니다. 잠시 후 다시 시도해 주세요.</div><button class="primary" onclick="showRegions()">처음으로</button>'; });
