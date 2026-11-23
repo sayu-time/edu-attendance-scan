@@ -163,6 +163,9 @@ tr.is-editing td { background: var(--accent-soft); }
 .skeleton + .skeleton { margin-top: var(--s-3); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
+.shot-view { display: grid; gap: var(--s-3); }
+.shot-view img { width: 100%; border-radius: var(--radius-sm); }
+
 /* 보기 전환, 기간 조회 */
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); justify-self: start; }
 .seg-btn { min-height: var(--control-h); padding: 0 var(--s-4); border: 0; background: var(--panel); font-size: var(--fs-2); font-weight: 500; cursor: pointer; transition: background-color var(--dur-micro) ease, color var(--dur-micro) ease; }

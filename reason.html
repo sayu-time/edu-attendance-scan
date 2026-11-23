@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="description" content="교육에 참석하지 못하는 사유와 현장 사진을 제출하는 화면입니다.">
+<title>사유 제출</title>
+<style>
+  body { font: 16px/1.5 -apple-system, 'Malgun Gothic', sans-serif; margin: 0; padding: 16px; background: #f6f7f9; color: #111; }
+  .box { max-width: 520px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: #666; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  button { font: inherit; padding: 14px 10px; border: 1px solid #cfd4dc; border-radius: 10px; background: #fff; }
+  button.primary { background: #2457f5; color: #fff; border-color: #2457f5; width: 100%; }
+  button[disabled] { opacity: 0.5; }
+  button.link { border: 0; background: none; color: #2457f5; margin-top: 12px; width: 100%; }
+  textarea { font: inherit; width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cfd4dc; border-radius: 10px; margin: 6px 0; }
+  .msg { padding: 24px 8px; text-align: center; font-size: 18px; }
+  .msg.late { color: #9a3412; }
+  .msg small { display: block; margin-top: 8px; font-size: 14px; color: #666; }
+  .back { background: none; border: 0; color: #666; padding: 4px 0; }
+  .guide { background: #fff4e0; color: #7a4d05; border-radius: 10px; padding: 12px 14px; margin: 10px 0; font-size: 15px; }
+  .guide b { display: block; margin-bottom: 4px; }
+  .guide ul { margin: 4px 0 0; padding-left: 20px; }
+  .late-note { background: #ffedd5; color: #9a3412; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 15px; }
+  .consent { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; font-size: 15px; }
+  .consent input { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+  video, canvas, img.shot { width: 100%; border-radius: 10px; background: #000; display: block; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .err { background: #fdeceb; color: #a8231a; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="box" id="app"><div class="msg">불러오는 중…</div></div>
+<script>
+  // 앱스크립트 웹 앱(/exec) 주소. 새 배포를 만들면 이 값을 바꾼다.
+  var API = 'https://script.google.com/macros/s/AKfycbxruK02BBOJH4XCRO0-m9iC6OD3ZEYtSA7JKiFWYOO2aPYxPBgbqYXreljuayCS2nCM/exec';
+  var TOKEN = new URLSearchParams(location.search).get('t') || '';
+  var D = null;
+  var app = document.getElementById('app');
+  var picked = null;
+  var photo = ''; // 촬영한 사진(JPEG data URL)
+  var stream = null;
+  var MAX_SIDE = 1024;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  var clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  function timeOf(iso) { var d = new Date(iso); return isNaN(d) ? '' : clock.format(d); }
+  function head() { return '<h1>' + esc(D.education) + ' 사유 제출</h1><div class="sub">' + esc(D.date) + (D.lateAfter ? ' 정시 ' + esc(D.lateAfter) : '') + '</div>'; }
+
+  var ERR = {
+    closed: '사유 제출 기간이 지났습니다.',
+    already: '이미 사유를 제출했습니다. 교육부의 확인을 기다려 주세요.',
+    'no-consent': '사진 수집 동의에 체크해 주세요.',
+    'bad-reason': '사유를 2자 이상 적어 주세요.',
+    'bad-photo': '사진을 다시 찍어 주세요.',
+    'too-big': '사진이 너무 큽니다. 다시 찍어 주세요.',
+    'not-enrolled': '이 교육의 명단에 없는 이름입니다.',
+    'unknown-session': '잘못된 링크입니다.',
+    error: '처리 중 오류가 났습니다. 잠시 후 다시 시도해 주세요.'
+  };
+
+  function call(fn, tries) {
+    tries = tries || 0;
+    function again() {
+      if (tries >= 4) return Promise.reject(new Error('retries exhausted'));
+      return wait(900 * (tries + 1) + Math.random() * 400).then(function () { return call(fn, tries + 1); });
+    }
+    return fn()
+      .then(function (r) { return (!r.ok && (r.reason === 'busy' || r.reason === 'error') && tries < 3) ? again() : r; })
+      .catch(function () { return again(); });
+  }
+
+  function stopCamera() { if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
+
+  function showRegions() {
+    stopCamera();
+    if (!D.open) { app.innerHTML = head() + '<div class="msg">사유 제출 기간이 지났습니다.</div>'; return; }
+    var present = D.regions.filter(function (r) { return D.roster.some(function (p) { return p.region === r; }); });
+    app.innerHTML = head() + '<p>내 <b>지역</b>을 눌러 주세요.</p><div class="grid">' + present.map(function (r) { return '<button data-r="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div>';
+    app.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { showNames(b.getAttribute('data-r')); }; });
+  }
+
+  function showNames(region) {
+    var list = D.roster.filter(function (p) { return p.region === region; });
+    app.innerHTML = head() + '<button class="back" id="back">← 지역 다시 고르기</button><p>내 <b>이름</b>을 눌러 주세요.</p><div class="grid">' + list.map(function (p) { return '<button data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>'; }).join('') + '</div>';
+    document.getElementById('back').onclick = showRegions;
+    app.querySelectorAll('[data-id]').forEach(function (b) { b.onclick = function () { picked = list.filter(function (p) { return String(p.id) === b.getAttribute('data-id'); })[0]; photo = ''; showForm(''); }; });
+  }
+
+  var GUIDE = '<div class="guide"><b>사진 안내</b><ul>' +
+    '<li>사유를 확인할 수 있는 <b>외부(현장)에서 직접 촬영</b>해 주세요.</li>' +
+    '<li>사진에는 <b>신체 일부(손, 얼굴 등)가 함께 나와야</b> 합니다.</li>' +
+    '<li>앨범의 사진은 올릴 수 없고, 이 화면에서 <b>카메라로 바로 찍은 사진</b>만 제출됩니다.</li>' +
+    '<li>사진은 교육부 담당자만 확인하며, 보관 기간(90일)이 지나면 삭제됩니다.</li></ul></div>';
+
+  function showForm(err, reasonText) {
+    stopCamera();
+    var note = D.lateAfter ? '<div class="late-note">정시(' + esc(D.lateAfter) + ') 이후에 제출하면 <b>지각</b>으로 처리됩니다. 사유가 인정되어도 제출한 시각이 기준입니다.</div>' : '';
+    app.innerHTML = head() + '<button class="back" id="back">← 이름 다시 고르기</button>' +
+      '<p><b>' + esc(picked.name) + '</b>님 (' + esc(picked.region) + ')</p>' + note + GUIDE +
+      (err ? '<div class="err" role="alert">' + esc(err) + '</div>' : '') +
+      '<label for="why">사유</label><textarea id="why" rows="3" maxlength="200" placeholder="예: 출장, 병원 진료 등">' + esc(reasonText || '') + '</textarea>' +
+      '<div id="shotbox">' + (photo ? '<img class="shot" src="' + photo + '" alt="찍은 사진"><div class="row"><button id="retake">다시 찍기</button><span></span></div>' : '<button id="cam" class="primary">카메라로 사진 찍기</button>') + '</div>' +
+      '<label class="consent"><input type="checkbox" id="ok"><span>사진에 신체 일부가 포함될 수 있음을 알고, 사유 확인 목적으로 사진을 수집, 이용하는 데 동의합니다. (교육부만 열람, 90일 후 삭제)</span></label>' +
+      '<button id="send" class="primary"' + (photo ? '' : ' disabled') + '>제출</button>';
+    document.getElementById('back').onclick = function () { showNames(picked.region); };
+    var cam = document.getElementById('cam');
+    if (cam) cam.onclick = startCamera;
+    var retake = document.getElementById('retake');
+    if (retake) retake.onclick = function () { photo = ''; startCamera(); };
+    document.getElementById('send').onclick = send;
+  }
+
+  // 앨범 선택을 막기 위해 파일 선택창이 아니라 화면 안에서 카메라를 직접 켠다.
+  function startCamera() {
+    var reasonText = (document.getElementById('why') || {}).value || '';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showCameraProblem(reasonText, '이 브라우저에서는 카메라를 쓸 수 없습니다. 크롬이나 사파리에서 이 링크를 열어 주세요.'); return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (s) {
+      stream = s;
+      var box = document.getElementById('shotbox');
+      box.innerHTML = '<video id="vid" playsinline muted autoplay></video><div class="row"><button id="snap" class="primary">촬영</button><button id="cancel">취소</button></div>';
+      var vid = document.getElementById('vid');
+      vid.srcObject = s;
+      document.getElementById('cancel').onclick = function () { showForm('', document.getElementById('why').value); };
+      document.getElementById('snap').onclick = function () { takeShot(vid, reasonText); };
+    }).catch(function () {
+      showCameraProblem(reasonText, '카메라를 켜지 못했습니다. 카메라 사용을 허용해 주세요. 카카오톡 같은 앱 안에서 연 경우에는 크롬이나 사파리로 열어 주세요.');
+    });
+  }
+
+  function showCameraProblem(reasonText, text) { showForm(text, reasonText); }
+
+  function takeShot(vid, reasonText) {
+    var w = vid.videoWidth, h = vid.videoHeight;
+    if (!w || !h) return;
+    var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+    var c = document.createElement('canvas');
+    c.width = Math.round(w * scale);
+    c.height = Math.round(h * scale);
+    c.getContext('2d').drawImage(vid, 0, 0, c.width, c.height);
+    photo = c.toDataURL('image/jpeg', 0.72);
+    showForm('', document.getElementById('why').value || reasonText);
+  }
+
+  function send() {
+    var why = document.getElementById('why').value.trim();
+    var ok = document.getElementById('ok').checked;
+    if (why.length < 2) { showForm(ERR['bad-reason'], why); return; }
+    if (!photo) { showForm('카메라로 사진을 찍어 주세요.', why); return; }
+    if (!ok) { showForm(ERR['no-consent'], why); return; }
+    var btn = document.getElementById('send');
+    btn.disabled = true;
+    btn.textContent = '제출 중…';
+    call(function () {
+      return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'reason', token: TOKEN, personId: picked.id, reason: why, photo: photo, consent: true }) }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      if (!r.ok) { showForm(ERR[r.reason] || ERR.error, why); return; }
+      photo = '';
+      var t = r.at ? '<small>' + esc(timeOf(r.at)) + ' 제출로 기록되었습니다.</small>' : '';
+      var late = r.late ? '<div class="msg late"><b>정시(' + esc(r.lateAfter) + ') 이후에 제출하여 지각으로 처리됩니다.</b></div>' : '';
+      app.innerHTML = head() + '<div class="msg">' + esc(picked.name) + '님 사유가 제출되었습니다.<br>교육부 담당자가 확인합니다.' + t + '</div>' + late;
+    }).catch(function () { showForm('연결이 불안정합니다. 잠시 후 다시 시도해 주세요.', why); });
+  }
+
+  if (!TOKEN) {
+    app.innerHTML = '<div class="msg">잘못된 링크입니다.</div>';
+  } else {
+    call(function () { return fetch(API + '?format=json&kind=reason&t=' + encodeURIComponent(TOKEN)).then(function (r) { return r.json(); }); })
+      .then(function (r) {
+        if (!r.ok) { app.innerHTML = '<div class="msg">잘못된 링크입니다.</div>'; return; }
+        D = r;
+        showRegions();
+      }).catch(function () { app.innerHTML = '<div class="msg">연결이 불안정합니다. 잠시 후 다시 열어 주세요.</div>'; });
+  }
+</script>
+</body>
+</html>
