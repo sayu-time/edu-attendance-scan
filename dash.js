@@ -4,7 +4,7 @@
   // 앱스크립트 웹 앱(/exec) 주소. 새 배포를 만들면 이 값을 바꾼다.
   const API = 'https://script.google.com/macros/s/AKfycbxruK02BBOJH4XCRO0-m9iC6OD3ZEYtSA7JKiFWYOO2aPYxPBgbqYXreljuayCS2nCM/exec';
   const MODE = document.documentElement.getAttribute('data-mode'); // 'admin' | 'leader'
-  const CHIP = { 출석: 'ok', 지각: 'late', 결석: 'absent', 사유출석: 'excused', 미확인: 'pending' };
+  const CHIP = { 출석: 'ok', 지각: 'late', 결석: 'absent', 사유결석: 'excused', 미확인: 'pending' };
   const SESSION_STATE = { scheduled: '시작 전', open: '출석 받는 중', closed: '마감' };
   const MESSAGES = {
     'bad-code': '코드를 다시 확인해 주세요.',
@@ -12,7 +12,7 @@
     network: '연결이 불안정합니다. 잠시 후 다시 시도해 주세요.',
     error: '처리 중 오류가 났습니다. 잠시 후 다시 시도해 주세요.',
     forbidden: '이 작업을 할 수 있는 권한이 없습니다.',
-    'reason-required': '사유출석은 사유를 적어 주세요.',
+    'reason-required': '사유결석은 사유를 적어 주세요.',
     'unknown-session': '회차를 찾을 수 없습니다.',
     'not-found': '대상을 찾을 수 없습니다. 새로고침해 주세요.',
     'not-enrolled': '이 회차 명단에 없는 사람입니다.',
@@ -189,7 +189,7 @@
         <div class="figure figure--ok"><b>${c.출석}</b><span>출석</span></div>
         <div class="figure figure--late"><b>${c.지각}</b><span>지각</span></div>
         <div class="figure figure--absent"><b>${c.결석}</b><span>결석</span></div>
-        <div class="figure"><b>${c.사유출석}</b><span>사유출석</span></div>
+        <div class="figure"><b>${c.사유결석}</b><span>사유결석</span></div>
         <div class="figure"><b>${c.미확인}</b><span>미확인</span></div>
       </div>`;
     const regionRows = v.summary.byRegion.map((g) => `
@@ -201,7 +201,7 @@
       </section>` : '';
     const walk = MODE === 'admin' && v.walkIns && v.walkIns.length ? renderWalkIns() : '';
     const reasonsPanel = renderReasons();
-    const filters = ['전체', '지각', '결석', '사유출석', '미확인', '출석'].map((f) => `<option${f === S.filter ? ' selected' : ''}>${f}</option>`).join('');
+    const filters = ['전체', '지각', '결석', '사유결석', '미확인', '출석'].map((f) => `<option${f === S.filter ? ' selected' : ''}>${f}</option>`).join('');
     const rosterPanel = `
       <section class="panel"><div class="panel-head"><h2>${MODE === 'admin' ? '출결 명단' : esc(S.region) + ' 출결 명단'}</h2>
         <div class="tools"><input type="search" id="q" placeholder="이름 검색" aria-label="이름 검색" value="${esc(S.q)}"><select id="filter" aria-label="상태 필터">${filters}</select><select id="sort" aria-label="정렬">${['명단순', '도착순'].map((o) => `<option${o === S.sort ? ' selected' : ''}>${o}</option>`).join('')}</select></div></div>
@@ -254,7 +254,7 @@
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><p>조건에 맞는 사람이 없습니다.</p></div></td></tr>`;
       return;
     }
-    const statusChoices = MODE === 'admin' ? ['출석', '지각', '결석', '사유출석', '미확인'] : ['결석', '사유출석'];
+    const statusChoices = MODE === 'admin' ? ['출석', '지각', '결석', '사유결석', '미확인'] : ['결석', '사유결석'];
     tbody.innerHTML = list.map((r) => {
       if (S.editing === r.personId) {
         const opts = statusChoices.map((s) => `<option${s === r.status ? ' selected' : ''}>${s}</option>`).join('');
@@ -262,7 +262,7 @@
         return `<tr class="is-editing" data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
           <td><select data-edit="status" aria-label="상태">${opts}</select></td>
           <td>${fmtTime(r.at)}</td>
-          <td><input type="text" data-edit="reason" maxlength="200" placeholder="사유" value="${esc(r.reason)}" aria-label="사유"${startStatus === '사유출석' ? '' : ' hidden'}></td>
+          <td><input type="text" data-edit="reason" maxlength="200" placeholder="사유" value="${esc(r.reason)}" aria-label="사유"${startStatus === '사유결석' ? '' : ' hidden'}></td>
           <td><div class="row-actions"><button class="btn btn--small btn--primary" data-act="save" type="button">저장</button><button class="btn btn--small" data-act="cancel" type="button">취소</button></div></td></tr>`;
       }
       return `<tr data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
@@ -406,7 +406,7 @@
     if (t.id === 'sort') { S.sort = t.value; setUrl(); renderRows(); return; }
     if (t.getAttribute && t.getAttribute('data-edit') === 'status') {
       const input = t.closest('tr').querySelector('[data-edit=reason]');
-      input.hidden = t.value !== '사유출석';
+      input.hidden = t.value !== '사유결석';
       if (!input.hidden) input.focus();
     }
   });
@@ -465,9 +465,7 @@
     const items = list.map((r) => {
       const chip = `<span class="chip chip--${r.state === '승인' ? 'ok' : r.state === '반려' ? 'absent' : 'pending'}">${esc(r.state)}</span>`;
       const late = r.late ? '<span class="chip chip--late">정시 이후 제출</span>' : '';
-      const acts = MODE === 'admin'
-        ? `<div class="acts">${r.hasPhoto ? '<button class="btn btn--small" data-act="reason-photo" type="button">사진 보기</button>' : '<span class="muted">사진 없음(보관 기간 지남)</span>'}${r.state === '대기' ? '<button class="btn btn--small btn--primary" data-act="reason-approve" type="button">승인</button><button class="btn btn--small btn--quiet" data-act="reason-reject" type="button">반려</button>' : ''}</div>`
-        : '';
+      const acts = `<div class="acts">${r.hasPhoto ? '<button class="btn btn--small" data-act="reason-photo" type="button">사진 보기</button>' : '<span class="muted">사진 없음</span>'}${r.state === '대기' ? '<button class="btn btn--small btn--primary" data-act="reason-approve" type="button">승인</button><button class="btn btn--small btn--quiet" data-act="reason-reject" type="button">반려</button>' : ''}</div>`;
       return `<li data-rid="${esc(r.id || '')}" data-name="${esc(r.name)}"><div class="who-line"><b>${esc(r.name)}</b><span class="muted">${esc(r.region)}</span>${chip}${late}<span class="muted">${fmtTime(r.at)} 제출</span></div><div class="memo">${esc(r.reason)}</div>${acts}</li>`;
     }).join('');
     return `<section class="panel"><div class="panel-head"><h2>사유 제출 ${list.length}건</h2><span class="state-tag">확인 대기 ${waiting}건</span></div><ul class="queue">${items}</ul></section>`;
@@ -503,7 +501,7 @@
     const li = btn.closest('li');
     const name = li.getAttribute('data-name');
     const ask = decision === 'approve'
-      ? `${name}님의 사유를 승인할까요? 정시 전에 제출했으면 사유출석, 정시 뒤에 제출했으면 지각(사유 있는 지각)으로 바뀝니다.`
+      ? `${name}님의 사유를 승인할까요? 정시 전에 제출했으면 사유결석, 정시 뒤에 제출했으면 지각(사유 있는 지각)으로 바뀝니다.`
       : `${name}님의 사유를 반려할까요? 상태는 그대로 두고 사유만 반려됩니다.`;
     if (!confirm(ask)) return;
     btn.disabled = true;
@@ -514,7 +512,7 @@
   }
 
   /* ---------- 기간 보기: 지각, 결석 횟수 ---------- */
-  const KINDS = ['지각+결석', '지각', '결석', '사유출석', '지각+결석+사유출석'];
+  const KINDS = ['지각+결석', '지각', '결석', '사유결석', '지각+결석+사유결석'];
   const kindCount = (p, kind) => kind.split('+').reduce((sum, k) => sum + (p[k] || 0), 0);
   const todayStr = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
@@ -575,9 +573,9 @@
     const open = d.sessions.filter((s) => s.status !== 'closed').length;
     const note = open ? `<div class="notice notice--warn">마감하지 않은 회차가 ${open}개 있습니다. 그 회차의 안 온 사람은 결석으로 세지 않아서 결석이 적게 보일 수 있습니다.</div>` : '';
     const rows = list.map((x) => `<tr><td>${esc(x.p.name)}</td><td>${esc(x.p.region)}</td>
-      <td class="num">${x.p.지각}</td><td class="num">${x.p.결석}</td><td class="num">${x.p.사유출석}</td><td class="num"><b>${x.c}</b></td><td class="num">${x.p.total}</td></tr>`).join('');
+      <td class="num">${x.p.지각}</td><td class="num">${x.p.결석}</td><td class="num">${x.p.사유결석}</td><td class="num"><b>${x.c}</b></td><td class="num">${x.p.total}</td></tr>`).join('');
     el.innerHTML = `${note}<div class="panel-body"><span class="state-tag">기간 안 ${d.sessionCount}개 회차 중 ${list.length}명이 조건에 맞습니다.</span></div>
-      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th><th class="num">지각</th><th class="num">결석</th><th class="num">사유출석</th><th class="num">선택한 합계</th><th class="num">대상 회차</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th><th class="num">지각</th><th class="num">결석</th><th class="num">사유결석</th><th class="num">선택한 합계</th><th class="num">대상 회차</th></tr></thead><tbody>${rows}</tbody></table></div>`
         : '<div class="empty"><p>조건에 맞는 사람이 없습니다.</p></div>'}`;
   }
 
@@ -592,8 +590,8 @@
 
   function downloadPeriodCsv() {
     const list = periodList();
-    const head = ['이름', '지역', '지각', '결석', '사유출석', '선택한 합계', '대상 회차'];
-    const lines = [head.map(csvCell).join(',')].concat(list.map((x) => [x.p.name, x.p.region, x.p.지각, x.p.결석, x.p.사유출석, x.c, x.p.total].map(csvCell).join(',')));
+    const head = ['이름', '지역', '지각', '결석', '사유결석', '선택한 합계', '대상 회차'];
+    const lines = [head.map(csvCell).join(',')].concat(list.map((x) => [x.p.name, x.p.region, x.p.지각, x.p.결석, x.p.사유결석, x.c, x.p.total].map(csvCell).join(',')));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
