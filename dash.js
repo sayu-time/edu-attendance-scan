@@ -39,7 +39,8 @@
     editing: '',
     filter: params.get('f') || '전체',
     sort: params.get('o') || '명단순',
-    mode: params.get('m') === 'period' ? 'period' : 'session',
+    mode: ['period', 'education'].indexOf(params.get('m')) !== -1 ? params.get('m') : 'session',
+    edu: { status: 'idle', data: null, error: '' },
     period: { status: 'idle', data: null, error: '' },
     pf: { education: '', from: '', to: '', kind: '지각+결석', cmp: '이상', n: 1 },
     q: params.get('q') || '',
@@ -73,7 +74,7 @@
     if (S.sessionId) p.set('s', S.sessionId);
     if (S.filter && S.filter !== '전체') p.set('f', S.filter);
     if (S.sort && S.sort !== '명단순') p.set('o', S.sort);
-    if (S.mode === 'period') p.set('m', 'period');
+    if (S.mode !== 'session') p.set('m', S.mode);
     if (S.q) p.set('q', S.q);
     const qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
@@ -126,7 +127,9 @@
       S.sessions = r.sessions;
       if (!S.sessions.length) { S.status = 'ready'; S.view = null; renderDash(); return; }
       if (!S.sessions.some((s) => s.id === S.sessionId)) S.sessionId = S.sessions[0].id;
+      if (S.mode === 'education' && MODE !== 'admin') S.mode = 'session';
       if (S.mode === 'period') { S.status = 'ready'; renderDash(); runPeriod(); return; }
+      if (S.mode === 'education') { S.status = 'ready'; renderDash(); loadEducations(); return; }
       loadView();
     });
   }
@@ -151,6 +154,7 @@
   function renderDash() {
     if (!S.role) return;
     if (S.mode === 'period') { renderPeriodScreen(); return; }
+    if (S.mode === 'education') { renderEducationScreen(); return; }
     let body = '';
     if (S.status === 'error') {
       body = `<div class="panel"><div class="empty"><p>${esc(S.error)}</p><button class="btn" data-act="retry" type="button">다시 시도</button></div></div>`;
@@ -175,7 +179,6 @@
     let acts = '';
     if (MODE === 'admin' && cur) {
       acts += `<button class="btn" data-act="newsession" type="button">새 회차</button>`;
-      acts += `<button class="btn" data-act="rule-settings" type="button">퇴소 기준</button>`;
       if (cur.status !== 'open' && cur.status !== 'closed') acts += `<button class="btn btn--primary" data-act="open" type="button">출석 열기</button>`;
       if (cur.status === 'open') acts += `<button class="btn" data-act="close" type="button">출석 마감</button>`;
       if (cur.status !== 'closed') acts += `<button class="btn" data-act="qr" type="button">QR 보기</button>`;
@@ -342,12 +345,12 @@
     document.getElementById('r-rec').disabled = !on;
   }
 
-  function showRuleSettings() {
+  function showRuleSettings(preselect) {
     api('rules').then((r) => {
       if (!r.ok) { setNotice(msg(r.reason)); return; }
       ruleData = r.rules;
       if (!ruleData.length) { setNotice('설정할 교육이 없습니다.'); return; }
-      const cur = S.view && S.view.session ? S.view.session.educationId : '';
+      const cur = preselect || (S.view && S.view.session ? S.view.session.educationId : '');
       const opts = ruleData.map((x) => `<option value="${esc(x.name)}"${x.name === cur ? ' selected' : ''}>${esc(x.name)}${x.rule ? ' (사용 중)' : ''}</option>`).join('');
       openDialog(`<h2>퇴소 기준</h2>
         <p class="sub">기준에 따라 이름 옆에 (퇴소자)가 자동으로 붙고 빠집니다. 퇴소자도 출석과 사유결석 처리는 똑같이 됩니다.</p>
@@ -382,7 +385,7 @@
         return;
       }
       closeDialog();
-      loadView(true);
+      if (S.mode === 'education') loadEducations(); else loadView(true);
     });
   }
 
@@ -390,6 +393,47 @@
     if (e.target.id === 'r-edu') fillRuleFields();
     else if (e.target.id === 'r-on') toggleRuleFields();
   });
+
+
+  /* ---------- 교육 보기: 교육마다 퇴소 기준 ---------- */
+  const ruleText = (rule) => (rule ? `결석 ${rule.absences}번이면 퇴소, 정시 출석 연속 ${rule.recover}번이면 복귀` : '사용 안 함');
+
+  function renderEducationScreen() {
+    const E = S.edu;
+    let body;
+    if (E.status === 'loading' || E.status === 'idle') {
+      body = '<div class="panel-body"><span class="skeleton" style="width:40%"></span><span class="skeleton"></span><span class="skeleton" style="width:70%"></span></div>';
+    } else if (E.status === 'error') {
+      body = `<div class="empty"><p>${esc(E.error)}</p><button class="btn" data-act="edu-reload" type="button">다시 시도</button></div>`;
+    } else if (!E.data.length) {
+      body = '<div class="empty"><p>등록된 교육이 없습니다.</p></div>';
+    } else {
+      const rows = E.data.map((e) => `<tr data-edu="${esc(e.name)}"><td><b>${esc(e.name)}</b></td><td class="num">${e.count}</td><td class="num">${e.closed}/${e.sessions}</td>
+        <td>${esc(ruleText(e.rule))}</td><td class="num">${e.rule ? e.removed.length : '<span class="muted">-</span>'}</td>
+        <td><div class="row-actions">${e.rule && e.removed.length ? '<button class="btn btn--small btn--quiet" data-act="edu-removed" type="button">퇴소자 보기</button>' : ''}<button class="btn btn--small" data-act="edu-rule" type="button">기준 설정</button></div></td></tr>`).join('');
+      body = `<div class="table-wrap"><table><thead><tr><th>교육</th><th class="num">대상자</th><th class="num">마감 회차</th><th>퇴소 기준</th><th class="num">지금 퇴소자</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+    app.innerHTML = `<div class="wrap">${renderModeSwitch()}<section class="panel"><div class="panel-head"><h2>교육별 퇴소 기준</h2><span class="state-tag">기준에 따라 이름 옆에 (퇴소자)가 자동으로 붙고 빠집니다</span></div>${body}</section></div>`;
+  }
+
+  function loadEducations() {
+    S.edu = { status: 'loading', data: null, error: '' };
+    renderEducationScreen();
+    return api('educationOverview').then((r) => {
+      S.edu = r.ok ? { status: 'ready', data: r.educations, error: '' } : { status: 'error', data: null, error: msg(r.reason) };
+      if (S.mode === 'education') renderEducationScreen();
+    });
+  }
+
+  function showRemovedList(name) {
+    const e = (S.edu.data || []).find((x) => x.name === name);
+    if (!e) return;
+    const rows = e.removed.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.region)}</td></tr>`).join('');
+    openDialog(`<h2>${esc(name)} 퇴소자 ${e.removed.length}명</h2>
+      <p class="sub">마감한 모든 회차를 기준으로 계산한 지금의 퇴소자입니다.</p>
+      <div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">닫기</button></div>`);
+  }
 
   /* ---------- QR 이미지 ---------- */
   // 칸(모듈) 하나를 정수 픽셀로 그려서 가장자리가 번지지 않게 하고, 사방에 흰 여백(4칸)을 둔다.
@@ -501,7 +545,10 @@
     if (act === 'reason-photo') { const li = btn.closest('li'); showPhoto(li.getAttribute('data-rid'), li.getAttribute('data-name')); return; }
     if (act === 'reason-approve') { decideReason(btn, 'approve'); return; }
     if (act === 'reason-reject') { decideReason(btn, 'reject'); return; }
-    if (act === 'rule-settings') { showRuleSettings(); return; }
+    if (act === 'mode-education') { S.mode = 'education'; setUrl(); renderDash(); if (S.edu.status === 'idle') loadEducations(); return; }
+    if (act === 'edu-reload') { loadEducations(); return; }
+    if (act === 'edu-rule') { showRuleSettings(btn.closest('tr').getAttribute('data-edu')); return; }
+    if (act === 'edu-removed') { showRemovedList(btn.closest('tr').getAttribute('data-edu')); return; }
     if (act === 'rule-save') { saveRuleSettings(btn); return; }
     if (act === 'qr') { showQr(); return; }
     if (act === 'qr-download') { downloadQrPng(); return; }
@@ -653,7 +700,7 @@
     const on = (m) => (S.mode === m ? ' is-on' : '');
     return `<div class="seg" role="group" aria-label="보기 방식">
       <button class="seg-btn${on('session')}" data-act="mode-session" type="button" aria-pressed="${S.mode === 'session'}">회차 보기</button>
-      <button class="seg-btn${on('period')}" data-act="mode-period" type="button" aria-pressed="${S.mode === 'period'}">기간 보기</button></div>`;
+      <button class="seg-btn${on('period')}" data-act="mode-period" type="button" aria-pressed="${S.mode === 'period'}">기간 보기</button>${MODE === 'admin' ? `<button class="seg-btn${on('education')}" data-act="mode-education" type="button" aria-pressed="${S.mode === 'education'}">교육 보기</button>` : ''}</div>`;
   }
 
   function periodList() {
