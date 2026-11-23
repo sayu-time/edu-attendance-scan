@@ -18,6 +18,8 @@
     'not-enrolled': '이 회차 명단에 없는 사람입니다.',
     'bad-date': '날짜를 올바르게 입력해 주세요. 시작일이 종료일보다 늦으면 안 됩니다.',
     'bad-time': '정시 도착 시간을 올바르게 입력해 주세요.',
+    'session-open': '출석을 마감한 뒤에 지울 수 있습니다.',
+    'bad-confirm': '입력한 글자가 다릅니다. 안내된 글자를 그대로 입력해 주세요.',
     'too-many': '기간 안에 회차가 너무 많습니다. 기간을 줄여 주세요.',
   };
 
@@ -173,6 +175,7 @@
       if (cur.status === 'open') acts += `<button class="btn" data-act="close" type="button">출석 마감</button>`;
       if (cur.status !== 'closed') acts += `<button class="btn" data-act="qr" type="button">QR 보기</button>`;
       acts += `<button class="btn" data-act="reason-link" type="button"${S.view && S.view.reasonLink ? '' : ' disabled'}>사유 링크</button>`;
+      acts += `<button class="btn btn--danger" data-act="del-session" type="button"${S.view ? '' : ' disabled'}>회차 삭제</button>`;
     }
     acts += `<button class="btn" data-act="csv" type="button"${S.view ? '' : ' disabled'}>CSV 내려받기</button>`;
     return `<div class="toolbar"><div class="pick"><label for="session">회차</label><select id="session">${opts}</select></div><div class="tools"><span class="state-tag">${esc(state)}</span><span class="state-tag">${esc(cur && cur.lateAfter ? '정시 ' + cur.lateAfter : '지각 기준 없음')}</span>${acts}</div></div>`;
@@ -361,6 +364,8 @@
     if (act === 'mode-session') { S.mode = 'session'; setUrl(); if (S.view || !S.sessions.length) renderDash(); else loadView(); return; }
     if (act === 'period-run') { runPeriod(); return; }
     if (act === 'period-csv') { downloadPeriodCsv(); return; }
+    if (act === 'del-session') { showDeleteSession(); return; }
+    if (act === 'dlg-delete') { runDeleteSession(btn); return; }
     if (act === 'reason-link') { showReasonLink(); return; }
     if (act === 'reason-copy') { copyReasonLink(btn); return; }
     if (act === 'reason-photo') { const li = btn.closest('li'); showPhoto(li.getAttribute('data-rid'), li.getAttribute('data-name')); return; }
@@ -411,6 +416,46 @@
   });
 
 
+
+  /* ---------- 회차 삭제 ---------- */
+  const deleteText = (s) => `${s.educationId} ${s.date}`;
+
+  function showDeleteSession() {
+    const s = S.view && S.view.session;
+    if (!s) return;
+    if (s.status === 'open') {
+      openDialog(`<h2>회차 삭제</h2><div class="notice notice--error">출석을 받는 중인 회차는 지울 수 없습니다. 먼저 <b>출석 마감</b>을 눌러 주세요.</div>
+        <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">닫기</button></div>`);
+      return;
+    }
+    openDialog(`<h2>회차 삭제</h2>
+      <p>이 회차의 <b>출석, 수정, 명단 외 접수, 사유 제출 기록과 사유 사진</b>이 모두 지워집니다. <b>되돌릴 수 없습니다.</b></p>
+      <p class="sub">지우려면 아래 글자를 그대로 입력해 주세요.</p>
+      <p><b>${esc(deleteText(s))}</b></p>
+      <input type="text" id="d-confirm" autocomplete="off" style="width:100%" aria-label="확인 글자">
+      <div class="notice notice--error" id="d-err" hidden role="alert"></div>
+      <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">취소</button><button class="btn btn--danger" data-act="dlg-delete" type="button" disabled>삭제</button></div>`);
+  }
+
+  function runDeleteSession(btn) {
+    const input = document.getElementById('d-confirm');
+    const err = document.getElementById('d-err');
+    btn.disabled = true;
+    api('deleteSession', { sessionId: S.sessionId, confirm: input.value }).then((r) => {
+      if (!r.ok) { btn.disabled = false; err.hidden = false; err.textContent = msg(r.reason); return; }
+      closeDialog();
+      S.sessionId = '';
+      S.view = null;
+      init();
+    });
+  }
+
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'd-confirm') return;
+    const s = S.view && S.view.session;
+    const btn = document.querySelector('[data-act=dlg-delete]');
+    if (s && btn) btn.disabled = e.target.value.trim() !== deleteText(s);
+  });
 
   /* ---------- 사유 제출(사진) ---------- */
   function renderReasons() {

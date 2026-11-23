@@ -84,6 +84,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: 0; overflow-wrap: brea
 .btn--primary:active { background: var(--accent-press); }
 .btn--quiet { border-color: transparent; background: transparent; color: var(--ink-2); }
 .btn--quiet:hover { background: var(--bar-track); border-color: transparent; }
+.btn--danger { color: var(--absent-ink); border-color: var(--line-strong); }
+.btn--danger:hover { background: var(--absent-bg); border-color: var(--absent-ink); }
 .btn--small { min-height: 32px; padding: 0 var(--s-3); font-size: var(--fs-1); }
 
 .field, select, input[type='text'], input[type='search'], input[type='password'], input[type='date'], input[type='time'], input[type='number'] {
