@@ -169,6 +169,9 @@ tr.is-editing td { background: var(--accent-soft); }
 .shot-view { display: grid; gap: var(--s-3); }
 .shot-view img { width: 100%; border-radius: var(--radius-sm); }
 
+textarea { font: inherit; font-size: var(--fs-2); padding: var(--s-3); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.check { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-2); color: var(--ink); }
+
 /* 보기 전환, 기간 조회 */
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--panel); justify-self: start; }
 .seg-btn { min-height: var(--control-h); padding: 0 var(--s-4); border: 0; background: var(--panel); font-size: var(--fs-2); font-weight: 500; cursor: pointer; transition: background-color var(--dur-micro) ease, color var(--dur-micro) ease; }

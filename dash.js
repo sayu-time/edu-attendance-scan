@@ -18,6 +18,9 @@
     'not-enrolled': '이 회차 명단에 없는 사람입니다.',
     'bad-date': '날짜를 올바르게 입력해 주세요. 시작일이 종료일보다 늦으면 안 됩니다.',
     'bad-time': '정시 도착 시간을 올바르게 입력해 주세요.',
+    'bad-rule': '횟수는 1에서 20 사이의 정수로 입력해 주세요.',
+    'bad-name': '이름이 너무 깁니다. 한 줄에 한 명씩 이름만 적어 주세요.',
+    'unknown-education': '교육을 찾을 수 없습니다.',
     'session-open': '출석을 마감한 뒤에 지울 수 있습니다.',
     'bad-confirm': '입력한 글자가 다릅니다. 안내된 글자를 그대로 입력해 주세요.',
     'too-many': '기간 안에 회차가 너무 많습니다. 기간을 줄여 주세요.',
@@ -172,6 +175,7 @@
     let acts = '';
     if (MODE === 'admin' && cur) {
       acts += `<button class="btn" data-act="newsession" type="button">새 회차</button>`;
+      acts += `<button class="btn" data-act="rule-settings" type="button">퇴소 기준</button>`;
       if (cur.status !== 'open' && cur.status !== 'closed') acts += `<button class="btn btn--primary" data-act="open" type="button">출석 열기</button>`;
       if (cur.status === 'open') acts += `<button class="btn" data-act="close" type="button">출석 마감</button>`;
       if (cur.status !== 'closed') acts += `<button class="btn" data-act="qr" type="button">QR 보기</button>`;
@@ -317,6 +321,76 @@
   }
 
 
+
+  /* ---------- 퇴소 기준 설정 ---------- */
+  let ruleData = [];
+
+  function fillRuleFields() {
+    const sel = document.getElementById('r-edu');
+    const item = ruleData.find((x) => x.name === sel.value);
+    if (!item) return;
+    document.getElementById('r-on').checked = !!item.rule;
+    document.getElementById('r-abs').value = item.rule ? item.rule.absences : 1;
+    document.getElementById('r-rec').value = item.rule ? item.rule.recover : 2;
+    document.getElementById('r-names').value = item.names.join('\n');
+    toggleRuleFields();
+  }
+
+  function toggleRuleFields() {
+    const on = document.getElementById('r-on').checked;
+    document.getElementById('r-abs').disabled = !on;
+    document.getElementById('r-rec').disabled = !on;
+  }
+
+  function showRuleSettings() {
+    api('rules').then((r) => {
+      if (!r.ok) { setNotice(msg(r.reason)); return; }
+      ruleData = r.rules;
+      if (!ruleData.length) { setNotice('설정할 교육이 없습니다.'); return; }
+      const cur = S.view && S.view.session ? S.view.session.educationId : '';
+      const opts = ruleData.map((x) => `<option value="${esc(x.name)}"${x.name === cur ? ' selected' : ''}>${esc(x.name)}${x.rule ? ' (사용 중)' : ''}</option>`).join('');
+      openDialog(`<h2>퇴소 기준</h2>
+        <p class="sub">기준에 따라 이름 옆에 (퇴소자)가 자동으로 붙고 빠집니다. 퇴소자도 출석과 사유결석 처리는 똑같이 됩니다.</p>
+        <div class="dlg-grid">
+          <div><label for="r-edu">교육</label><br><select id="r-edu" style="width:100%">${opts}</select></div>
+          <label class="check"><input type="checkbox" id="r-on"> 이 교육은 퇴소자 표시를 사용</label>
+          <div><label for="r-abs">결석이 몇 번이면 퇴소자가 되나요?</label><br><input type="number" id="r-abs" min="1" max="20" style="width:100%"></div>
+          <div><label for="r-rec">정시에 연속 몇 번 출석하면 일반 참석자로 돌아오나요?</label><br><input type="number" id="r-rec" min="1" max="20" style="width:100%"></div>
+          <div><label for="r-names">처음부터 퇴소자인 사람 (이름, 한 줄에 한 명)</label><br><textarea id="r-names" rows="4" style="width:100%"></textarea>
+            <span class="sub">시스템을 쓰기 전부터 퇴소자였던 사람입니다. 이후에는 기준에 따라 자동으로 바뀝니다.</span></div>
+          <div class="notice notice--error" id="r-err" hidden role="alert"></div>
+        </div>
+        <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">취소</button><button class="btn btn--primary" data-act="rule-save" type="button">저장</button></div>`);
+      fillRuleFields();
+    });
+  }
+
+  function saveRuleSettings(btn) {
+    const err = document.getElementById('r-err');
+    btn.disabled = true;
+    api('saveRule', {
+      education: document.getElementById('r-edu').value,
+      enabled: document.getElementById('r-on').checked,
+      absences: document.getElementById('r-abs').value,
+      recover: document.getElementById('r-rec').value,
+      names: document.getElementById('r-names').value,
+    }).then((r) => {
+      if (!r.ok) {
+        btn.disabled = false;
+        err.hidden = false;
+        err.textContent = r.reason === 'unknown-names' ? `명단에 없는 이름이 있습니다: ${r.names.join(', ')}` : msg(r.reason);
+        return;
+      }
+      closeDialog();
+      loadView(true);
+    });
+  }
+
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'r-edu') fillRuleFields();
+    else if (e.target.id === 'r-on') toggleRuleFields();
+  });
+
   /* ---------- QR 이미지 ---------- */
   // 칸(모듈) 하나를 정수 픽셀로 그려서 가장자리가 번지지 않게 하고, 사방에 흰 여백(4칸)을 둔다.
   // 오류 보정은 M: H 보다 칸이 적고 커서 프로젝터로 멀리서 찍을 때 더 잘 읽힌다.
@@ -427,6 +501,8 @@
     if (act === 'reason-photo') { const li = btn.closest('li'); showPhoto(li.getAttribute('data-rid'), li.getAttribute('data-name')); return; }
     if (act === 'reason-approve') { decideReason(btn, 'approve'); return; }
     if (act === 'reason-reject') { decideReason(btn, 'reject'); return; }
+    if (act === 'rule-settings') { showRuleSettings(); return; }
+    if (act === 'rule-save') { saveRuleSettings(btn); return; }
     if (act === 'qr') { showQr(); return; }
     if (act === 'qr-download') { downloadQrPng(); return; }
     if (act === 'csv') { downloadCsv(); return; }
