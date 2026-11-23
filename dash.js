@@ -304,9 +304,64 @@
     const link = S.view && S.view.scanLink;
     if (!link) return;
     openDialog(`<h2>출석 QR</h2><div class="qr-box"><div id="qr"></div><div class="link">${esc(link)}</div></div>
-      <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">닫기</button></div>`);
-    if (typeof QRCode === 'function') new QRCode(document.getElementById('qr'), { text: link, width: 280, height: 280 });
-    else document.getElementById('qr').textContent = '(QR 라이브러리를 불러오지 못했습니다. 아래 링크를 쓰세요.)';
+      <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">닫기</button><button class="btn btn--primary" data-act="qr-download" type="button">고해상도 이미지 저장</button></div>`);
+    const box = document.getElementById('qr');
+    if (typeof QRCode === 'function') {
+      const c = qrPngCanvas(link, 960);
+      c.style.cssText = 'width:min(100%,340px);height:auto;display:block;';
+      box.appendChild(c);
+    } else {
+      box.textContent = '(QR 라이브러리를 불러오지 못했습니다. 아래 링크를 쓰세요.)';
+    }
+  }
+
+
+  /* ---------- QR 이미지 ---------- */
+  // 칸(모듈) 하나를 정수 픽셀로 그려서 가장자리가 번지지 않게 하고, 사방에 흰 여백(4칸)을 둔다.
+  // 오류 보정은 M: H 보다 칸이 적고 커서 프로젝터로 멀리서 찍을 때 더 잘 읽힌다.
+  function qrPngCanvas(text, targetPx) {
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    document.body.appendChild(holder);
+    try {
+      const qr = new QRCode(holder, { text: text, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.M });
+      const model = qr._oQRCode;
+      const count = model.getModuleCount();
+      const quiet = 4;
+      const cell = Math.max(8, Math.ceil(targetPx / (count + quiet * 2)));
+      const size = (count + quiet * 2) * cell;
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#000000';
+      for (let r = 0; r < count; r++) {
+        for (let col = 0; col < count; col++) {
+          if (model.isDark(r, col)) ctx.fillRect((col + quiet) * cell, (r + quiet) * cell, cell, cell);
+        }
+      }
+      return c;
+    } finally {
+      holder.remove();
+    }
+  }
+
+  function downloadQrPng() {
+    const v = S.view;
+    if (!v || !v.scanLink || typeof QRCode !== 'function') { setNotice('QR 라이브러리를 불러오지 못했습니다. 새로고침해 주세요.'); return; }
+    const canvas = qrPngCanvas(v.scanLink, 2400);
+    const name = `QR_${v.session.educationId}_${v.session.date}`.replace(/[\\/:*?"<>|\s]+/g, '_');
+    canvas.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }, 'image/png');
   }
 
   /* ---------- CSV ---------- */
@@ -372,6 +427,7 @@
     if (act === 'reason-approve') { decideReason(btn, 'approve'); return; }
     if (act === 'reason-reject') { decideReason(btn, 'reject'); return; }
     if (act === 'qr') { showQr(); return; }
+    if (act === 'qr-download') { downloadQrPng(); return; }
     if (act === 'csv') { downloadCsv(); return; }
     if (act === 'newsession') { showNewSession(); return; }
     if (act === 'dlg-close') { closeDialog(); return; }
