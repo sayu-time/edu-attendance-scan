@@ -52,6 +52,7 @@
   // QR 출석 시각(UTC 문자열)을 한국 시간 시:분:초로 보여 준다. 기록이 없으면 하이픈.
   const fmtTime = (iso) => (iso && !isNaN(new Date(iso)) ? esc(clock.format(new Date(iso))) : '<span class="muted">-</span>');
   const fmtDateTime = (iso) => (iso && !isNaN(new Date(iso)) ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }) : '');
+  const nameCell = (r) => esc(r.name) + (r.removed ? ' <span class="tag-removed">(퇴소자)</span>' : '');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const msg = (reason) => MESSAGES[reason] || '처리하지 못했습니다. 다시 시도해 주세요.';
 
@@ -201,9 +202,9 @@
       </section>` : '';
     const walk = MODE === 'admin' && v.walkIns && v.walkIns.length ? renderWalkIns() : '';
     const reasonsPanel = renderReasons();
-    const filters = ['전체', '지각', '결석', '사유결석', '미확인', '출석'].map((f) => `<option${f === S.filter ? ' selected' : ''}>${f}</option>`).join('');
+    const filters = ['전체', '퇴소자', '지각', '결석', '사유결석', '미확인', '출석'].map((f) => `<option${f === S.filter ? ' selected' : ''}>${f}</option>`).join('');
     const rosterPanel = `
-      <section class="panel"><div class="panel-head"><h2>${MODE === 'admin' ? '출결 명단' : esc(S.region) + ' 출결 명단'}</h2>
+      <section class="panel"><div class="panel-head"><h2>${MODE === 'admin' ? '출결 명단' : esc(S.region) + ' 출결 명단'}</h2>${v.removedCount ? `<span class="state-tag">퇴소자 ${v.removedCount}명</span>` : ''}
         <div class="tools"><input type="search" id="q" placeholder="이름 검색" aria-label="이름 검색" value="${esc(S.q)}"><select id="filter" aria-label="상태 필터">${filters}</select><select id="sort" aria-label="정렬">${['명단순', '도착순'].map((o) => `<option${o === S.sort ? ' selected' : ''}>${o}</option>`).join('')}</select></div></div>
         <div id="notice"></div>
         <div class="table-wrap"><table><thead><tr><th>이름</th><th>지역</th><th>상태</th><th>출석 시간</th><th>사유</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -232,7 +233,7 @@
 
   function visibleRows() {
     const q = S.q.trim();
-    const list = S.view.rows.filter((r) => (S.filter === '전체' || r.status === S.filter) && (!q || r.name.indexOf(q) !== -1));
+    const list = S.view.rows.filter((r) => (S.filter === '전체' || (S.filter === '퇴소자' ? r.removed : r.status === S.filter)) && (!q || r.name.indexOf(q) !== -1));
     if (S.sort === '도착순') {
       // 출석 시각이 빠른 순. 기록이 없는 사람은 맨 뒤에 둔다.
       return list.slice().sort((a, b) => (a.at && b.at ? (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) : a.at ? -1 : b.at ? 1 : 0));
@@ -259,13 +260,13 @@
       if (S.editing === r.personId) {
         const opts = statusChoices.map((s) => `<option${s === r.status ? ' selected' : ''}>${s}</option>`).join('');
         const startStatus = statusChoices.indexOf(r.status) === -1 ? statusChoices[0] : r.status;
-        return `<tr class="is-editing" data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
+        return `<tr class="is-editing" data-id="${esc(r.personId)}"><td>${nameCell(r)}</td><td>${esc(r.region)}</td>
           <td><select data-edit="status" aria-label="상태">${opts}</select></td>
           <td>${fmtTime(r.at)}</td>
           <td><input type="text" data-edit="reason" maxlength="200" placeholder="사유" value="${esc(r.reason)}" aria-label="사유"${startStatus === '사유결석' ? '' : ' hidden'}></td>
           <td><div class="row-actions"><button class="btn btn--small btn--primary" data-act="save" type="button">저장</button><button class="btn btn--small" data-act="cancel" type="button">취소</button></div></td></tr>`;
       }
-      return `<tr data-id="${esc(r.personId)}"><td>${esc(r.name)}</td><td>${esc(r.region)}</td>
+      return `<tr data-id="${esc(r.personId)}"><td>${nameCell(r)}</td><td>${esc(r.region)}</td>
         <td><span class="chip chip--${CHIP[r.status]}">${esc(r.status)}</span></td>
         <td>${fmtTime(r.at)}</td>
         <td>${r.reason ? esc(r.reason) : '<span class="muted">없음</span>'}</td>
@@ -372,8 +373,8 @@
   }
   function downloadCsv() {
     const v = S.view;
-    const head = ['이름', '지역', '상태', '출석시간', '사유'];
-    const lines = [head.map(csvCell).join(',')].concat(v.rows.map((r) => [r.name, r.region, r.status, fmtDateTime(r.at), r.reason].map(csvCell).join(',')));
+    const head = ['이름', '지역', '구분', '상태', '출석시간', '사유'];
+    const lines = [head.map(csvCell).join(',')].concat(v.rows.map((r) => [r.name, r.region, r.removed ? '퇴소자' : '일반', r.status, fmtDateTime(r.at), r.reason].map(csvCell).join(',')));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -522,7 +523,7 @@
       const chip = `<span class="chip chip--${r.state === '승인' ? 'ok' : r.state === '반려' ? 'absent' : 'pending'}">${esc(r.state)}</span>`;
       const late = r.late ? '<span class="chip chip--late">정시 이후 제출</span>' : '';
       const acts = `<div class="acts">${r.hasPhoto ? '<button class="btn btn--small" data-act="reason-photo" type="button">사진 보기</button>' : '<span class="muted">사진 없음</span>'}${r.state === '대기' ? '<button class="btn btn--small btn--primary" data-act="reason-approve" type="button">승인</button><button class="btn btn--small btn--quiet" data-act="reason-reject" type="button">반려</button>' : ''}</div>`;
-      return `<li data-rid="${esc(r.id || '')}" data-name="${esc(r.name)}"><div class="who-line"><b>${esc(r.name)}</b><span class="muted">${esc(r.region)}</span>${chip}${late}<span class="muted">${fmtTime(r.at)} 제출</span></div><div class="memo">${esc(r.reason)}</div>${acts}</li>`;
+      return `<li data-rid="${esc(r.id || '')}" data-name="${esc(r.name)}"><div class="who-line"><b>${esc(r.name)}</b>${r.removed ? '<span class="tag-removed">(퇴소자)</span>' : ''}<span class="muted">${esc(r.region)}</span>${chip}${late}<span class="muted">${fmtTime(r.at)} 제출</span></div><div class="memo">${esc(r.reason)}</div>${acts}</li>`;
     }).join('');
     return `<section class="panel"><div class="panel-head"><h2>사유 제출 ${list.length}건</h2><span class="state-tag">확인 대기 ${waiting}건</span></div><ul class="queue">${items}</ul></section>`;
   }

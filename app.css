@@ -138,6 +138,7 @@ tr.is-editing td { background: var(--accent-soft); }
 .chip--ok { background: var(--ok-bg); color: var(--ok-ink); }
 .chip--absent { background: var(--absent-bg); color: var(--absent-ink); }
 .chip--excused { background: var(--excused-bg); color: var(--excused-ink); }
+.tag-removed { color: var(--absent-ink); font-size: var(--fs-1); font-weight: 500; white-space: nowrap; }
 .chip--late { background: var(--late-bg); color: var(--late-ink); }
 .chip--pending { background: var(--pending-bg); color: var(--pending-ink); }
 
