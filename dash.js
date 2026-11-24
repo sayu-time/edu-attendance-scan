@@ -225,41 +225,26 @@
     const clean = (n) => String(n).replace(/^'(?=[=+\-@])/, '');
     const items = v.walkIns.map((w) => {
       const name = clean(w.name);
-      const candidates = v.rows.filter((r) => r.region === w.region && r.status !== '출석' && r.status !== '지각');
       const same = v.rows.find((r) => r.name === name);
       const sameDone = !!same && (same.status === '출석' || same.status === '지각');
-      const pre = same && !sameDone && candidates.some((r) => r.personId === same.personId) ? same.personId : '';
-      const opts = ['<option value="">누구인지 고르세요</option>']
-        .concat(candidates.map((r) => `<option value="${esc(r.personId)}"${r.personId === pre ? ' selected' : ''}>${esc(r.name)}</option>`)).join('');
       const hint = sameDone
         ? `<div class="notice notice--warn hint">같은 이름(${esc(same.name)})이 이미 출석했습니다. 중복 접수일 수 있으니 <b>반려</b>를 권합니다.</div>`
-        : (pre ? '<div class="sub hint">명단에 같은 이름이 있어 미리 골라 두었습니다. 맞는지 확인하세요.</div>' : '');
+        : (same ? `<div class="notice notice--warn hint">명단에 같은 이름(${esc(same.name)})이 이미 있습니다. 그 사람의 <b>수정</b>에서 상태를 출석으로 바꾸고, 이 접수는 <b>반려</b>하세요.</div>` : '');
       return `<li data-key="${esc(w.key)}">
         <div class="who-line"><b>${esc(name)}</b><span class="muted">${esc(w.region)}</span><span class="muted">${fmtTime(w.at)} 접수</span></div>
         ${w.memo ? `<div class="memo">${esc(w.memo)}</div>` : ''}
         ${hint}
         <div class="acts">
-          <select aria-label="연결할 사람"${candidates.length ? '' : ' disabled'}>${candidates.length ? opts : '<option value="">연결할 사람 없음</option>'}</select>
-          <button class="btn btn--small" data-act="walk-link" type="button"${pre ? '' : ' disabled'}>이 사람으로 연결</button>
           <button class="btn btn--small" data-act="walk-add" type="button">명단에 추가</button>
           <button class="btn btn--small btn--quiet" data-act="walk-reject" type="button">반려</button>
         </div></li>`;
     }).join('');
     const help = `<div class="panel-body help">
       <p>참석자가 QR 화면에서 <b>"명단에 없어요"</b>를 눌러 직접 이름을 적어 낸 접수입니다. 하나씩 처리해 주세요.</p>
-      <p><b>이 사람으로 연결</b>: 명단에 있는 사람이 이름을 다르게 적었거나 잘못 눌러서 들어온 경우입니다. 목록에서 그 사람을 고르면 <b>그 사람이 출석 처리</b>됩니다. 출석 시각은 접수한 시각으로 기록됩니다.</p>
-      <p><b>명단에 추가</b>: 이 교육 명단에 원래 없던 새 사람일 때. 명단에 추가되고 출석 처리됩니다.</p>
+      <p><b>명단에 추가</b>: 이 교육 명단에 원래 없던 새 사람일 때. 명단에 추가되고 출석 처리됩니다. 출석 시각은 접수한 시각으로 기록됩니다.</p>
       <p><b>반려</b>: 이미 출석한 사람의 중복 접수이거나 잘못 들어온 접수일 때. 되돌릴 수 없습니다.</p></div>`;
     return `<section class="panel"><div class="panel-head"><h2>명단에 없는 접수 ${v.walkIns.length}건</h2></div>${help}<ul class="queue">${items}</ul></section>`;
   }
-
-  // 연결할 사람을 고르기 전에는 "이 사람으로 연결"을 누를 수 없게 한다(잘못된 사람에게 연결하는 실수 방지).
-  document.addEventListener('change', (e) => {
-    const sel = e.target;
-    if (!(sel && sel.tagName === 'SELECT' && sel.closest && sel.closest('.queue'))) return;
-    const btn = sel.closest('.acts').querySelector('[data-act=walk-link]');
-    if (btn) btn.disabled = !sel.value;
-  });
 
   function visibleRows() {
     const q = S.q.trim();
@@ -593,7 +578,7 @@
       const key = li.getAttribute('data-key');
       const resolution = act.slice(5);
       if (resolution === 'reject' && !confirm('이 접수를 반려할까요? 되돌릴 수 없습니다.')) return;
-      const personId = li.querySelector('select').value;
+      const personId = '';
       btn.disabled = true;
       api('resolveWalkIn', { sessionId: S.sessionId, key: key, resolution: resolution, personId: personId }).then((r) => {
         if (!r.ok) { btn.disabled = false; setNotice(msg(r.reason)); return; }
