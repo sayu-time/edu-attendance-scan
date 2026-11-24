@@ -153,6 +153,9 @@ tr.is-editing td { background: var(--accent-soft); }
 .queue li:last-child { border-bottom: 0; }
 .queue .who-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2); }
 .queue .who-line b { font-size: var(--fs-3); }
+.queue .hint { margin: 0; }
+.help p { margin: 0 0 var(--s-2); font-size: var(--fs-2); color: var(--ink-2); }
+.help p:last-child { margin-bottom: 0; }
 .queue .memo { color: var(--ink-2); font-size: var(--fs-2); }
 .queue .acts { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
 
