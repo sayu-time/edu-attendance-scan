@@ -20,6 +20,8 @@
     'bad-time': '정시 도착 시간을 올바르게 입력해 주세요.',
     'bad-rule': '횟수는 1에서 20 사이의 정수로 입력해 주세요.',
     'bad-name': '이름이 너무 깁니다. 한 줄에 한 명씩 이름만 적어 주세요.',
+    'duplicate-name': '명단에 같은 이름이 있어 추가하지 않았습니다',
+    'too-many-selected': '한 번에 100건까지 처리할 수 있습니다.',
     'unknown-education': '교육을 찾을 수 없습니다.',
     'session-open': '출석을 마감한 뒤에 지울 수 있습니다.',
     'bad-confirm': '입력한 글자가 다릅니다. 안내된 글자를 그대로 입력해 주세요.',
@@ -231,7 +233,7 @@
         ? `<div class="notice notice--warn hint">같은 이름(${esc(same.name)})이 이미 출석했습니다. 중복 접수일 수 있으니 <b>반려</b>를 권합니다.</div>`
         : (same ? `<div class="notice notice--warn hint">명단에 같은 이름(${esc(same.name)})이 이미 있습니다. 그 사람의 <b>수정</b>에서 상태를 출석으로 바꾸고, 이 접수는 <b>반려</b>하세요.</div>` : '');
       return `<li data-key="${esc(w.key)}">
-        <div class="who-line"><b>${esc(name)}</b><span class="muted">${esc(w.region)}</span><span class="muted">${fmtTime(w.at)} 접수</span></div>
+        <div class="who-line"><input type="checkbox" class="pick pick-walk" value="${esc(w.key)}" aria-label="${esc(name)} 선택"><b>${esc(name)}</b><span class="muted">${esc(w.region)}</span><span class="muted">${fmtTime(w.at)} 접수</span></div>
         ${w.memo ? `<div class="memo">${esc(w.memo)}</div>` : ''}
         ${hint}
         <div class="acts">
@@ -243,7 +245,7 @@
       <p>참석자가 QR 화면에서 <b>"명단에 없어요"</b>를 눌러 직접 이름을 적어 낸 접수입니다. 하나씩 처리해 주세요.</p>
       <p><b>명단에 추가</b>: 이 교육 명단에 원래 없던 새 사람일 때. 명단에 추가되고 출석 처리됩니다. 출석 시각은 접수한 시각으로 기록됩니다.</p>
       <p><b>반려</b>: 이미 출석한 사람의 중복 접수이거나 잘못 들어온 접수일 때. 되돌릴 수 없습니다.</p></div>`;
-    return `<section class="panel"><div class="panel-head"><h2>명단에 없는 접수 ${v.walkIns.length}건</h2></div>${help}<ul class="queue">${items}</ul></section>`;
+    return `<section class="panel"><div class="panel-head"><h2>명단에 없는 접수 ${v.walkIns.length}건</h2></div>${help}${bulkBar('walk', '<button class="btn btn--small btn--primary" data-act="walk-bulk-add" data-bulk="walk" type="button" disabled>선택한 접수 명단에 추가</button><button class="btn btn--small" data-act="walk-bulk-reject" data-bulk="walk" type="button" disabled>선택한 접수 반려</button>')}<ul class="queue">${items}</ul></section>`;
   }
 
   function visibleRows() {
@@ -443,6 +445,74 @@
       <div class="dlg-foot"><button class="btn" data-act="dlg-close" type="button">닫기</button></div>`);
   }
 
+
+  /* ---------- 선택한 것 한 번에 처리 ---------- */
+  const picked = (kind) => Array.from(document.querySelectorAll(`.pick-${kind}:checked`)).map((c) => c.value);
+
+  function bulkBar(kind, buttons) {
+    return `<div class="bulk"><label class="check"><input type="checkbox" data-all="${kind}"> 전체 선택</label>
+      <span class="state-tag" data-count="${kind}">0건 선택</span>${buttons}</div>`;
+  }
+
+  function refreshBulk(kind) {
+    const ids = picked(kind);
+    const count = document.querySelector(`[data-count="${kind}"]`);
+    if (count) count.textContent = `${ids.length}건 선택`;
+    document.querySelectorAll(`[data-bulk="${kind}"]`).forEach((b) => { b.disabled = !ids.length; });
+    const all = document.querySelector(`[data-all="${kind}"]`);
+    const total = document.querySelectorAll(`.pick-${kind}`).length;
+    if (all) all.checked = total > 0 && ids.length === total;
+  }
+
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t || !t.getAttribute) return;
+    const all = t.getAttribute('data-all');
+    if (all) { document.querySelectorAll(`.pick-${all}`).forEach((c) => { c.checked = t.checked; }); refreshBulk(all); return; }
+    if (t.classList.contains('pick-walk')) refreshBulk('walk');
+    else if (t.classList.contains('pick-reason')) refreshBulk('reason');
+  });
+
+  function bulkSummary(r) {
+    let text = `${r.done}건을 처리했습니다.`;
+    if (r.failed.length) {
+      const why = {};
+      r.failed.forEach((f) => { const m = msg(f.reason); why[m] = (why[m] || 0) + 1; });
+      text += `\n\n처리하지 못한 ${r.failed.length}건:\n` + Object.keys(why).map((m) => `- ${m} (${why[m]}건)`).join('\n');
+    }
+    return text;
+  }
+
+  function runBulk(btn, op, extra, ask) {
+    if (!confirm(ask)) return;
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '처리 중…';
+    api(op, extra).then((r) => {
+      if (!r.ok) { btn.disabled = false; btn.textContent = label; alert(msg(r.reason)); return; }
+      alert(bulkSummary(r));
+      loadView(true);
+    });
+  }
+
+  function bulkWalk(btn, resolution) {
+    const keys = picked('walk');
+    if (!keys.length) return;
+    const ask = resolution === 'add'
+      ? `선택한 ${keys.length}건을 이 교육 명단에 추가하고 출석 처리할까요? 명단에 같은 이름이 있는 접수는 중복을 막기 위해 건너뜁니다.`
+      : `선택한 ${keys.length}건을 반려할까요? 되돌릴 수 없습니다.`;
+    runBulk(btn, 'resolveWalkIns', { sessionId: S.sessionId, keys: keys, resolution: resolution }, ask);
+  }
+
+  function bulkReason(btn, decision) {
+    const ids = picked('reason');
+    if (!ids.length) return;
+    const ask = decision === 'approve'
+      ? `선택한 ${ids.length}건의 사유를 승인할까요? 정시 전에 제출한 것은 사유결석, 정시 뒤에 제출한 것은 지각(사유 있는 지각)으로 바뀝니다. 사진을 확인한 뒤에 승인해 주세요.`
+      : `선택한 ${ids.length}건의 사유를 반려할까요? 상태는 그대로 두고 사유만 반려됩니다.`;
+    runBulk(btn, 'decideReasons', { ids: ids, decision: decision }, ask);
+  }
+
   /* ---------- QR 이미지 ---------- */
   // 칸(모듈) 하나를 정수 픽셀로 그려서 가장자리가 번지지 않게 하고, 사방에 흰 여백(4칸)을 둔다.
   // 오류 보정은 M: H 보다 칸이 적고 커서 프로젝터로 멀리서 찍을 때 더 잘 읽힌다.
@@ -573,6 +643,10 @@
       });
       return;
     }
+    if (act === 'walk-bulk-add') { bulkWalk(btn, 'add'); return; }
+    if (act === 'walk-bulk-reject') { bulkWalk(btn, 'reject'); return; }
+    if (act === 'reason-bulk-approve') { bulkReason(btn, 'approve'); return; }
+    if (act === 'reason-bulk-reject') { bulkReason(btn, 'reject'); return; }
     if (act.indexOf('walk-') === 0) {
       const li = btn.closest('li');
       const key = li.getAttribute('data-key');
@@ -654,9 +728,9 @@
       const chip = `<span class="chip chip--${r.state === '승인' ? 'ok' : r.state === '반려' ? 'absent' : 'pending'}">${esc(r.state)}</span>`;
       const late = r.late ? '<span class="chip chip--late">정시 이후 제출</span>' : '';
       const acts = `<div class="acts">${r.hasPhoto ? '<button class="btn btn--small" data-act="reason-photo" type="button">사진 보기</button>' : '<span class="muted">사진 없음</span>'}${r.state === '대기' ? '<button class="btn btn--small btn--primary" data-act="reason-approve" type="button">승인</button><button class="btn btn--small btn--quiet" data-act="reason-reject" type="button">반려</button>' : ''}</div>`;
-      return `<li data-rid="${esc(r.id || '')}" data-name="${esc(r.name)}"><div class="who-line"><b>${esc(r.name)}</b>${r.removed ? '<span class="tag-removed">(퇴소자)</span>' : ''}<span class="muted">${esc(r.region)}</span>${chip}${late}<span class="muted">${fmtTime(r.at)} 제출</span></div><div class="memo">${esc(r.reason)}</div>${acts}</li>`;
+      return `<li data-rid="${esc(r.id || '')}" data-name="${esc(r.name)}"><div class="who-line">${r.state === '대기' ? `<input type="checkbox" class="pick pick-reason" value="${esc(r.id)}" aria-label="${esc(r.name)} 선택">` : ''}<b>${esc(r.name)}</b>${r.removed ? '<span class="tag-removed">(퇴소자)</span>' : ''}<span class="muted">${esc(r.region)}</span>${chip}${late}<span class="muted">${fmtTime(r.at)} 제출</span></div><div class="memo">${esc(r.reason)}</div>${acts}</li>`;
     }).join('');
-    return `<section class="panel"><div class="panel-head"><h2>사유 제출 ${list.length}건</h2><span class="state-tag">확인 대기 ${waiting}건</span></div><ul class="queue">${items}</ul></section>`;
+    return `<section class="panel"><div class="panel-head"><h2>사유 제출 ${list.length}건</h2><span class="state-tag">확인 대기 ${waiting}건</span></div>${waiting ? bulkBar('reason', '<button class="btn btn--small btn--primary" data-act="reason-bulk-approve" data-bulk="reason" type="button" disabled>선택한 사유 승인</button><button class="btn btn--small" data-act="reason-bulk-reject" data-bulk="reason" type="button" disabled>선택한 사유 반려</button>') : ''}<ul class="queue">${items}</ul></section>`;
   }
 
   function showReasonLink() {
