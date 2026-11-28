@@ -76,16 +76,20 @@
 
   function stopCamera() { if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
 
+  function byName(a, b) { return a.name.localeCompare(b.name, 'ko'); }
+  function groupOf(p) { return p.group || p.region; }
+
   function showRegions() {
     stopCamera();
     if (!D.open) { app.innerHTML = head() + '<div class="msg">사유 제출 기간이 지났습니다.</div>'; return; }
-    var present = D.regions.filter(function (r) { return D.roster.some(function (p) { return p.region === r; }); });
-    app.innerHTML = head() + '<p>내 <b>지역</b>을 눌러 주세요.</p><div class="grid">' + present.map(function (r) { return '<button data-r="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div>';
+    var order = D.groups && D.groups.length ? D.groups : D.regions;
+    var present = order.filter(function (r) { return D.roster.some(function (p) { return groupOf(p) === r; }); });
+    app.innerHTML = head() + '<p>내 <b>지역</b>이나 <b>부서</b>를 눌러 주세요.</p><div class="grid">' + present.map(function (r) { return '<button data-r="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div>';
     app.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { showNames(b.getAttribute('data-r')); }; });
   }
 
   function showNames(region) {
-    var list = D.roster.filter(function (p) { return p.region === region; });
+    var list = D.roster.filter(function (p) { return groupOf(p) === region; }).sort(byName);
     app.innerHTML = head() + '<button class="back" id="back">← 지역 다시 고르기</button><p>내 <b>이름</b>을 눌러 주세요.</p><div class="grid">' + list.map(function (p) { return '<button data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>'; }).join('') + '</div>';
     document.getElementById('back').onclick = showRegions;
     app.querySelectorAll('[data-id]').forEach(function (b) { b.onclick = function () { picked = list.filter(function (p) { return String(p.id) === b.getAttribute('data-id'); })[0]; photo = ''; showForm(''); }; });
@@ -101,13 +105,13 @@
     stopCamera();
     var note = D.lateAfter ? '<div class="late-note">정시(' + esc(D.lateAfter) + ') 이후에 제출하면 <b>지각</b>으로 처리됩니다. 사유가 인정되어도 제출한 시각이 기준입니다.</div>' : '';
     app.innerHTML = head() + '<button class="back" id="back">← 이름 다시 고르기</button>' +
-      '<p><b>' + esc(picked.name) + '</b>님 (' + esc(picked.region) + ')</p>' + note + GUIDE +
+      '<p><b>' + esc(picked.name) + '</b>님 (' + esc(groupOf(picked)) + ')</p>' + note + GUIDE +
       (err ? '<div class="err" role="alert">' + esc(err) + '</div>' : '') +
       '<label for="why">사유</label><textarea id="why" rows="3" maxlength="200" placeholder="예: 출장, 병원 진료 등">' + esc(reasonText || '') + '</textarea>' +
       '<div id="shotbox">' + (photo ? '<img class="shot" src="' + photo + '" alt="찍은 사진"><div class="row"><button id="retake">다시 찍기</button><span></span></div>' : '<button id="cam" class="primary">카메라로 사진 찍기</button>') + '</div>' +
       '<label class="consent"><input type="checkbox" id="ok"><span>사진에 신체 일부가 포함될 수 있음을 알고, 사유 확인 목적으로 사진을 수집, 이용하는 데 동의합니다. (교육부만 열람, 90일 후 삭제)</span></label>' +
       '<button id="send" class="primary"' + (photo ? '' : ' disabled') + '>제출</button>';
-    document.getElementById('back').onclick = function () { showNames(picked.region); };
+    document.getElementById('back').onclick = function () { showNames(groupOf(picked)); };
     var cam = document.getElementById('cam');
     if (cam) cam.onclick = startCamera;
     var retake = document.getElementById('retake');

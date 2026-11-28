@@ -64,16 +64,20 @@
     });
   }
 
+  function byName(a, b) { return a.name.localeCompare(b.name, 'ko'); }
+  function groupOf(p) { return p.group || p.region; }
+
   function showRegions() {
     if (!D.open) { app.innerHTML = head() + '<div class="msg">' + (D.status === 'scheduled' ? '아직 시작 전입니다. 잠시 후 다시 열어 주세요.' : '출석이 마감되었습니다.') + '</div>'; return; }
-    var present = D.regions.filter(function (r) { return D.roster.some(function (p) { return p.region === r; }); });
+    var order = D.groups && D.groups.length ? D.groups : D.regions;
+    var present = order.filter(function (r) { return D.roster.some(function (p) { return groupOf(p) === r; }); });
     app.innerHTML = head() + '<div class="grid">' + present.map(function (r) { return '<button data-r="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div><button class="link" id="walk">명단에 없어요</button>';
     app.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { showNames(b.getAttribute('data-r')); }; });
     document.getElementById('walk').onclick = showWalkIn;
   }
 
   function showNames(region) {
-    var list = D.roster.filter(function (p) { return p.region === region; });
+    var list = D.roster.filter(function (p) { return groupOf(p) === region; }).sort(byName);
     app.innerHTML = head() + '<button class="back" id="back">← 지역 다시 고르기</button><div class="grid">' + list.map(function (p) { return '<button data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>'; }).join('') + '</div><button class="link" id="walk">명단에 없어요</button>';
     document.getElementById('back').onclick = showRegions;
     document.getElementById('walk').onclick = showWalkIn;
@@ -82,8 +86,8 @@
 
   function confirmPick(id) {
     picked = D.roster.filter(function (p) { return String(p.id) === String(id); })[0];
-    app.innerHTML = head() + '<div class="msg"><b>' + esc(picked.name) + '</b>님 맞나요?<br><span class="sub">' + esc(picked.region) + '</span></div><button class="primary" id="ok">확인</button><button class="link" id="no">아니에요</button>';
-    document.getElementById('no').onclick = function () { showNames(picked.region); };
+    app.innerHTML = head() + '<div class="msg"><b>' + esc(picked.name) + '</b>님 맞나요?<br><span class="sub">' + esc(groupOf(picked)) + '</span></div><button class="primary" id="ok">확인</button><button class="link" id="no">아니에요</button>';
+    document.getElementById('no').onclick = function () { showNames(groupOf(picked)); };
     document.getElementById('ok').onclick = function () {
       this.disabled = true;
       post({ action: 'attend', token: TOKEN, personId: picked.id }).then(function (r) {
